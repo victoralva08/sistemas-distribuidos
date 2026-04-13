@@ -36,17 +36,15 @@ def main():
             cur.close()
             conn.close()
 
-            # ACK só depois de salvar
             ch.basic_ack(delivery_tag=method.delivery_tag)
 
         except Exception as e:
             print("Error:", e)
-            # NÃO dá ack → mensagem volta pra fila
 
     channel.basic_consume(
         queue='hello',
         on_message_callback=callback,
-        auto_ack=False  # ← MUITO IMPORTANTE
+        auto_ack=False
     )
 
     print('Waiting for messages. To exit press CTRL+C')
