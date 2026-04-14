@@ -1,10 +1,10 @@
-import pika, sys, os
-import psycopg2
+import pika, sys, os, json, psycopg2
 
 def main():
     connection = pika.BlockingConnection(
         pika.ConnectionParameters(host='localhost')
     )
+
     channel = connection.channel()
 
     channel.queue_declare(
@@ -14,13 +14,13 @@ def main():
     )
 
     def callback(ch, method, properties, body):
-        message = body.decode()
-        print(f"Received {message}")
+        payload = json.loads(body.decode())
+        print(f"Received {payload}")
 
         try:
             conn = psycopg2.connect(
                 host="localhost",
-                database="tasks_db",
+                database="sistemas_distribuidos_tp1_db",
                 user="user",
                 password="password"
             )
@@ -28,8 +28,8 @@ def main():
             cur = conn.cursor()
 
             cur.execute(
-                "INSERT INTO tasks (message) VALUES (%s)",
-                (message,)
+                "INSERT INTO tasks (event_id, payload) VALUES (%s, %s)",
+                (payload["event_id"], json.dumps(payload))
             )
 
             conn.commit()
