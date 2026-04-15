@@ -1,6 +1,0 @@
-CREATE TABLE IF NOT EXISTS tasks (
-    event_id UNIQUE PRIMARY KEY,
-    message JSONB NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW(),
-    deleted_at TIMESTAMP DEFAULT NULL
-);

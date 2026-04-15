@@ -18,24 +18,7 @@ def main():
         print(f"Received {payload}")
 
         try:
-            conn = psycopg2.connect(
-                host="localhost",
-                database="sistemas_distribuidos_tp1_db",
-                user="user",
-                password="password"
-            )
-
-            cur = conn.cursor()
-
-            cur.execute(
-                "INSERT INTO tasks (event_id, payload) VALUES (%s, %s)",
-                (payload["event_id"], json.dumps(payload))
-            )
-
-            conn.commit()
-            cur.close()
-            conn.close()
-
+            print(payload)
             ch.basic_ack(delivery_tag=method.delivery_tag)
 
         except Exception as e:

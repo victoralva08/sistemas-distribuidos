@@ -17,7 +17,7 @@ tasks = ["payment", "email", "report", "update"]
 
 start = time.time()
 
-TOTAL = 5000
+TOTAL = 1000
 
 for i in range(TOTAL):
     message = {
