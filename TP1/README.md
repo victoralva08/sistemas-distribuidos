@@ -1,273 +1,102 @@
-# TP01 – RabbitMQ: Sistema de Pedidos de E-commerce
-**BCC362 – Sistemas Distribuídos | Plano de Implementação v3.0**
+# Como Usar o Sistema de Pedidos (TP01)
+
+Este guia ensina como rodar todo o ecossistema construído para o projeto, entender a interface visual e guarnece você com o **Roteiro Exato de Apresentação** para mostrar o funcionamento a todos de uma forma super didática!
 
 ---
 
-## Arquitetura do Sistema
+## 1. Subindo a Infraestrutura Docker
+Antes de qualquer envio de mensagens, precisamos "ligar os motores" e subir nossa arquitetura.
 
-Cluster RabbitMQ de 3 nós com as seguintes configurações ativas:
-
-- **Topic Exchange** principal (`orders.exchange`) com 4 filas especializadas
-- **Quorum Queues** em todos os nós (replicação via Raft)
-- **Dead Letter Queue** (`orders.dlq`) para mensagens rejeitadas ou expiradas
-- **ACK manual** em todos os consumers
-- **PostgreSQL** como banco de persistência dos pedidos processados
-- **Dashboard web** em tempo real (Flask + SSE) com métricas do cluster
-
-### Filas e roteamento
-
-| Fila | Routing Key | Consumer |
-|---|---|---|
-| `orders.payment` | `order.payment.*` | consumer_payment.py |
-| `orders.stock` | `order.stock.*` | consumer_stock.py |
-| `orders.notification` | `order.notify.*` | consumer_notification.py |
-| `orders.audit` | `order.#` | consumer_audit.py (todas as mensagens) |
-| `orders.dlq` | — | Dead Letter (sem consumer ativo) |
+1. No terminal, na pasta `TP1`, suba o cluster e o banco:
+   ```bash
+   docker-compose up -d
+   ```
+2. Inicialize o cluster e ative configurações avançadas (*Quorum Queues*):
+   ```bash
+   bash init_cluster.sh
+   # (Caso use Windows, use Git Bash ou WSL para executar o .sh)
+   ```
+> **O que isso faz?** Isso cria 3 servidores locais do RabbitMQ que conversam entre si para que os dados nunca caiam, além de um banco de dados PostgreSQL real.
 
 ---
 
-## Instalação — 4 camadas
+## 2. Ligando a Interface Gráfica de Monitoramento
+Para não termos que ficar lendo letras difíceis do terminal, criamos um painel web super agradável para avaliar as métricas ao vivo!
 
-### 1. Single node (local)
-```bash
-docker run -d --hostname rabbit1 --name rabbitmq \
-  -p 5672:5672 -p 15672:15672 \
-  rabbitmq:3.13-management
-```
-
-### 2. Cluster local com Docker Compose
-```yaml
-# docker-compose.yml
-services:
-  rabbit1:
-    image: rabbitmq:3.13-management
-    hostname: rabbit1
-    environment:
-      RABBITMQ_ERLANG_COOKIE: "SECRET_COOKIE"
-    ports:
-      - "15672:15672"
-
-  rabbit2:
-    image: rabbitmq:3.13-management
-    hostname: rabbit2
-    environment:
-      RABBITMQ_ERLANG_COOKIE: "SECRET_COOKIE"
-    depends_on: [rabbit1]
-
-  rabbit3:
-    image: rabbitmq:3.13-management
-    hostname: rabbit3
-    environment:
-      RABBITMQ_ERLANG_COOKIE: "SECRET_COOKIE"
-    depends_on: [rabbit1]
-```
-
-Após subir, unir os nós ao cluster:
-```bash
-docker exec rabbit2 rabbitmqctl stop_app
-docker exec rabbit2 rabbitmqctl join_cluster rabbit@rabbit1
-docker exec rabbit2 rabbitmqctl start_app
-
-docker exec rabbit3 rabbitmqctl stop_app
-docker exec rabbit3 rabbitmqctl join_cluster rabbit@rabbit1
-docker exec rabbit3 rabbitmqctl start_app
-```
-
-Ativar Quorum Queues como padrão:
-```bash
-docker exec rabbit1 rabbitmqctl set_policy quorum-default ".*" \
-  '{"queue-mode":"lazy"}' --apply-to queues
-```
-
-### 3. Cluster em cloud pública — GCP Free Tier
-
-**Passo a passo:**
-
-1. Criar 3 VMs `e2-micro` no GCP (gratuitas no Free Tier) com Ubuntu 22.04
-2. Em cada VM, instalar Docker:
-```bash
-curl -fsSL https://get.docker.com | sh
-```
-3. Na VM `rabbit1`, iniciar o Swarm:
-```bash
-docker swarm init
-docker swarm join-token worker  # copiar o comando gerado
-```
-4. Nas VMs `rabbit2` e `rabbit3`, executar o join:
-```bash
-docker swarm join --token <TOKEN> <IP_RABBIT1>:2377
-```
-5. Deploy do stack:
-```bash
-docker stack deploy -c docker-compose.yml rabbitmq_cluster
-```
-
-### 4. Kubernetes (produção real)
-
-Para produção, a escolha seria o **RabbitMQ Cluster Operator**:
-
-```bash
-# Instalar o operator
-kubectl apply -f https://github.com/rabbitmq/cluster-operator/releases/latest/download/cluster-operator.yml
-
-# Criar o cluster
-kubectl apply -f - <<EOF
-apiVersion: rabbitmq.com/v1beta1
-kind: RabbitmqCluster
-metadata:
-  name: rabbitmq-cluster
-spec:
-  replicas: 3
-EOF
-```
-
-Para este trabalho, optamos pelo **Docker Swarm** por ser suficiente para demonstração e mais simples de configurar ao vivo. O Kubernetes seria a escolha em um ambiente de produção real.
+1. Instale as bibliotecas Python necessárias (apenas na primeira vez):
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. Dedique um terminal rolando o arquivo do site (nunca feche este terminal na apresentação):
+   ```bash
+   python dashboard.py
+   ```
+3. **Acesse via navegador URL:** `http://localhost:5000`
 
 ---
 
-## A Aplicação — Sistema de Pedidos de E-commerce
+## 3. Entendendo o Dashboard (Aprenda a Ler os Quadros)
+Quando você entra no `http://localhost:5000`, observará quatro blocos no topo e um grande gráfico abaixo. Eis o que significa cada um, de forma bem simples:
 
-### Por que e-commerce é um problema distribuído difícil
+### Os Blocos do Topo
+* **CONSUMERS ATIVOS:** Indica a quantidade de "trabalhadores" (nossos scripts de consumos) ligados no exato momento, esperando para processar pedidos.
+* **CONEXÕES AMQP:** Quantidade de clientes ativamente injetando ou consumindo.
+* **MSGS EM FILA (READY):** **Esta é a métrica mais importante!** Mostra quantas mensagens chegaram no sistema, e estão presas (engarrafadas) lá na fila sem ter ninguém para atendê-las no momento. É o estoque de trabalho atrasado.
+* **MSGS UNACKED (PROC):** Quantidade de mensagens que saíram da fila e estão "nas mãos" dos sistemas de pagamento neste milissegundo, quase sendo destruídas. Fica alta só quando há uma altíssima lentidão nos pagamentos.
 
-Sistemas de e-commerce enfrentam desafios clássicos de computação distribuída:
-
-- **Idempotência em pagamentos** — o mesmo pedido não pode ser cobrado duas vezes, mesmo se a mensagem for reentregue
-- **Consistência eventual** — estoque, pagamento e notificação são atualizados de forma assíncrona
-- **Saga Pattern** — cada etapa do pedido é uma transação independente com rollback próprio em caso de falha
-- **Pico de carga** — eventos como Black Friday exigem escalonamento sem downtime
-
-O RabbitMQ resolve esses desafios com: ACK manual (garante at-least-once delivery), DLQ (isola falhas), e escalonamento horizontal de consumers sem interrupção.
-
-### Fluxo de uma mensagem no sistema
-
-```
-Producer (pedido novo)
-    │
-    ▼
-orders.exchange  (Topic Exchange)
-    │
-    ├──► orders.payment     ──► consumer_payment  ──► PostgreSQL (payments)
-    ├──► orders.stock       ──► consumer_stock    ──► PostgreSQL (inventory)
-    ├──► orders.notification──► consumer_notify   ──► email/SMS
-    └──► orders.audit       ──► consumer_audit    ──► PostgreSQL (audit_log)
-                                                             │
-                                          falha / TTL ──► orders.dlq
-```
+### O Gráfico em Tempo Real
+* **Linha Azul Clara (Publish Rate - ENTRANDO):** É a vazão de chegada. Significa quantas compras dos clientes estão explodindo em demanda entrando no sistema (Medido em Mensagens por Segundo).
+* **Linha Roxa Escura (Deliver Rate - SAINDO):** É a vazão de resolução! Mostra a velocidade que os seus consumidores de pagamento estão pegando da fila e resolvendo com sucesso (Medido em Mensagens por Segundo).
 
 ---
 
-## Benchmark de Throughput
+## 4. Roteiro Passo a Passo de Demonstração (O Teatro)
+Abra no projetor ou na tela da videoconferência do Microsoft Teams o seu site do Dashboard (http://localhost:5000). A ideia aqui é comandar o sistema manualmente e devagar, aba por aba de terminal.
 
-Execute o script de benchmark e registre os valores reais:
+### Passo 1: Disparando o Gargalo ("Black Friday")
+Com a tela do Dashboard zerada, conte à turma que você vai mandar agora mesmo 5.000 requisições maciças pra simular uma loja em pico de uso.
+* **Execute em um Novo Terminal:** 
+  ```bash
+  python producer.py --total 5000
+  ```
+> **O que este comando faz:** Ele acorda um "robô", cria na mesma hora e atira 5.000 arquivos de compra virtual JSON para dentro do RabbitMQ (da fila `orders.payment`). Em seguida ele para de injetar.<br>
+> **O que vai acontecer ali:** No painel você verá a Linha Azul Clara subir forte e a métrica amarela **"MSGS EM FILA (READY)" cravar em 5000**.
+> **O que falar na apresentação:** Explique que num sistema normal de servidor comum de PHP ou Python, a máquina teria caído ao tentar gravar 5000 pedidos ao mesmo tempo no banco de dados. Como você usou a teoria de Message Broker da disciplina, as 5000 mensagens estão sãs e salvas, esperando. A aplicação aguentou a porrada!
 
-```bash
-python benchmark.py --msgs 100000 --consumers 1
-python benchmark.py --msgs 100000 --consumers 2
-python benchmark.py --msgs 100000 --consumers 4
-```
+### Passo 2: Demonstrando o Consumo e a Vazão
+Diga à classe que o servidor de pagamentos chegou para trabalhar e vai processar o engarrafamento.
+* **Execute em um Novo Terminal:** 
+  ```bash
+  python consumer_payment.py
+  ```
+> **O que este comando faz:** Liga o serviço real consumidor de fila. Ele se apresenta à porta da fila `orders.payment` e pede uma mensagem por vez enquanto joga no banco de dados. <br>
+> **O que vai acontecer ali:** A mágica! O enorme número amarelo vai começar a **despencar** em queda livre para zero de forma muito rápida. A linha Roxa Escura começará a se desenhar, pois simboliza a vazão *Saindo*.<br>
+> **O que falar na apresentação:** Fale sobre Throughput e Vazão; você acabou de provar, visualmente, como o seu ecossistema processa os pagamentos.
 
-Apresentar gráfico gerado com matplotlib mostrando mensagens/segundo por número de consumers. **Não usar valores estimados — apenas os medidos.**
+### Passo 3: Demonstrando Escalabilidade com Concorrência ("Elasticidade")
+Diga à classe que o servidor resolveu, mas queremos ser **duas vezes mais rápidos**.
+* **Comando:** Enquanto envia novos dados volumosos (`python producer.py --total 100000`), abra **Duas (ou mais) Abas** ao mesmo tempo e execute em cada uma delas aquele mesmo comando de consumo `python consumer_payment.py`.
+> **O que falar na apresentação:** Isso é escalabilidade horizontal da vida real! No dashboard você mostrará a linha Roxa pular para uma capacidade muito maior de atendimento. 
 
----
-
-## Demo ao Vivo — Roteiro Técnico
-
-### Tolerância a falhas
-```bash
-# Com o sistema rodando e enviando mensagens, derrubar rabbit2:
-docker stop rabbit2
-
-# Mostrar no Management UI que o cluster continua com 2 nós
-# Mostrar que mensagens continuam sendo processadas
-# Recriar o nó:
-docker start rabbit2
-```
-
-### Escalonamento de consumers
-```bash
-# Subir um segundo consumer_payment sem parar o sistema:
-docker-compose up -d --scale consumer_payment=3
-# Mostrar no dashboard que o throughput aumenta
-```
-
----
-
-## Roteiro de Apresentação (30 minutos)
-
-| Tempo | Seção | Conteúdo | Item |
-|---|---|---|---|
-| 0–5 min | O que é RabbitMQ | AMQP, casos de uso, deployments famosos (Instagram, Reddit), quando usar vs Kafka | 1 |
-| 5–10 min | Arquitetura interna | Exchanges, Queues, Bindings, VHosts, Plugins, Management UI ao vivo | 2 |
-| 10–15 min | Instalação | Single node → Docker → Cluster → Docker Swarm → GCP → Quorum Queues → Kubernetes | 3 |
-| 15–20 min | A aplicação | Desafios do e-commerce distribuído, sistema rodando, dashboard ao vivo, tolerância a falhas, escalonamento, throughput medido | 4 |
-| 20–30 min | Questionários | Perguntas do professor + Q&A preparado | 5 |
+### Passo 4: O Teste Extra (Para tirar nota "10")
+Isso atende ao requisito de falhas críticas.
+* **Comandos:** Enquanto dados sobem e descem, abra outra aba e desligue na força bruta o contêiner de um nó:
+  ```bash
+  docker stop rabbit2
+  ```
+> **O que falar na apresentação:** Use isso como grand-finale. Se 1 banco de dados caísse, era fim de negócio. Como rodamos o cluster com tecnologia de *"Quorum Queues"*, o sistema manteve o serviço em pé perfeitamente entre o nó que sobrou, e no gráfico as quedas das filas continuam sendo limpas perfeitamente! 
 
 ---
 
-## Questionários — 8 Perguntas com Respostas
+## 5. Teste Automático de Média Pura (O pc fazendo tudo sozinho)
+Caso você queira só extrair o cálculo matemático final e as métricas sem rodar o teatro humano, você pode usar a nossa ferramenta `benchmark.py`.
 
-**Q1. Qual a diferença entre RabbitMQ e Apache Kafka?**
-
-RabbitMQ é um message broker orientado a filas (push-based), ideal para tarefas transacionais com roteamento complexo e ACK por mensagem. Kafka é um log de eventos distribuído (pull-based), otimizado para alta taxa de ingestão e replay de eventos. RabbitMQ entrega e apaga a mensagem; Kafka retém e permite reprocessamento.
-
----
-
-**Q2. O que é um Exchange e quais os tipos disponíveis?**
-
-Exchange é o componente que recebe mensagens do producer e as roteia para filas. Tipos: **Direct** (routing key exata), **Topic** (wildcards `*` e `#`), **Fanout** (broadcast para todas as filas) e **Headers** (roteamento por atributos de cabeçalho).
-
----
-
-**Q3. O que são Quorum Queues e por que foram escolhidas?**
-
-Quorum Queues são filas replicadas baseadas no algoritmo de consenso Raft. Uma mensagem só é confirmada após ser gravada na maioria dos nós. Substituem as Classic Mirrored Queues por serem mais seguras e previsíveis em caso de falha de nó.
-
----
-
-**Q4. O que acontece se um nó cai sem haver quorum?**
-
-Se o número de nós disponíveis cai abaixo do quorum (maioria), a fila fica indisponível até que nós suficientes voltem ou sejam adicionados. Isso é intencional: prioriza consistência sobre disponibilidade (CP no teorema CAP).
-
----
-
-**Q5. O que é Dead Letter Queue e quando uma mensagem vai para ela?**
-
-DLQ é uma fila especial que recebe mensagens que não puderam ser processadas. Uma mensagem vai para a DLQ quando: (1) é rejeitada com `basic.nack` sem requeue, (2) expira o TTL da mensagem ou da fila, ou (3) a fila atinge o limite máximo de mensagens.
-
----
-
-**Q6. Como funciona o ACK manual e por que é importante?**
-
-No ACK manual, o consumer só confirma (`basic.ack`) após processar com sucesso. Se o consumer morrer antes, o RabbitMQ reentrega a mensagem. Isso garante _at-least-once delivery_. Sem ACK manual (auto-ack), a mensagem é removida ao ser entregue, mesmo que o processamento falhe.
-
----
-
-**Q7. Como escalar consumers sem parar o sistema?**
-
-Basta iniciar novas instâncias do consumer apontando para a mesma fila. O RabbitMQ distribui as mensagens em round-robin automaticamente (competing consumers pattern). Com `prefetch_count` configurado, cada consumer recebe apenas N mensagens de uma vez. Não há downtime.
-
----
-
-**Q8. Por que Docker Swarm e não Kubernetes neste trabalho?**
-
-Para o escopo de demonstração, Docker Swarm é suficiente e muito mais simples de configurar. Kubernetes oferece mais recursos (auto-scaling, rolling updates, health checks avançados) e seria a escolha em produção real usando o RabbitMQ Cluster Operator. Conhecemos ambos e escolhemos o mais adequado ao contexto.
-
----
-
-## Checklist de Entrega
-
-- [ ] Cluster 3 nós RabbitMQ via Docker Compose (local)
-- [ ] Mesmo cluster via Docker Swarm em 3 VMs no GCP Free Tier
-- [ ] Slide comparando Docker Swarm vs Kubernetes
-- [ ] Topic Exchange com 4 filas especializadas
-- [ ] Quorum Queues ativadas e demonstradas
-- [ ] Dead Letter Queue configurada e demonstrada
-- [ ] Producer enviando 100k mensagens
-- [ ] 4 consumers especializados salvando no PostgreSQL
-- [ ] Dashboard web com métricas em tempo real (Flask + SSE)
-- [ ] Demo de tolerância a falhas ao vivo
-- [ ] 2 slides sobre desafios distribuídos do e-commerce
-- [ ] Diagrama de sequência real do fluxo no sistema
-- [ ] Throughput medido com valores reais + gráfico
-- [ ] 8 questionários estudados por todos do grupo
-- [ ] README completo com instruções de execução
+* **Este comando liga tudo e já te devolve no terminal um relatório final de tempo bruto:**
+  ```bash
+  python benchmark.py --msgs 100000 --consumers 1
+  ```
+* **Para rodar gerando o gráfico (.png) para seus arquivos de entrega:**
+  ```bash
+  python benchmark.py --msgs 100000 --consumers 4
+  python benchmark.py --plot-only
+  ```

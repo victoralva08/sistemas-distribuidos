@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RabbitMQ - E-Commerce Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', system-ui, sans-serif; }
+        .card { background-color: #1e293b; border-radius: 0.5rem; padding: 1.5rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); border: 1px solid #334155; }
+        .metric-value { font-size: 2.25rem; font-weight: 700; color: #38bdf8; }
+        .metric-label { font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 0.25rem;}
+    </style>
+</head>
+<body class="p-8">
+    <div class="max-w-7xl mx-auto">
+        <header class="mb-8 flex flex-col md:flex-row justify-between items-start md:items-end border-b border-slate-700 pb-4 gap-4">
+            <div>
+                <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-blue-500">TP01 Dashboard</h1>
+                <p class="text-slate-400 mt-1">Monitoramento em Tempo Real do Cluster RabbitMQ</p>
+            </div>
+            <div id="status-indicator" class="flex items-center text-sm font-semibold text-emerald-400 bg-slate-800 px-3 py-1.5 rounded-full border border-slate-700">
+                <span class="relative flex h-2 w-2 mr-2">
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                Conectado ao Node
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div class="card">
+                <div class="metric-label">Consumers Ativos</div>
+                <div class="metric-value font-mono" id="val-consumers">0</div>
+            </div>
+            <div class="card">
+                <div class="metric-label">Conexões AMQP</div>
+                <div class="metric-value font-mono" id="val-connections" style="color: #a78bfa;">0</div>
+            </div>
+            <div class="card">
+                <div class="metric-label">Msgs em Fila (Ready)</div>
+                <div class="metric-value font-mono" id="val-ready" style="color: #fbbf24;">0</div>
+            </div>
+            <div class="card">
+                <div class="metric-label">Msgs Unacked (Proc)</div>
+                <div class="metric-value font-mono" id="val-unacked" style="color: #f87171;">0</div>
+            </div>
+        </div>
+
+        <div class="card mb-8">
+            <h2 class="text-lg font-semibold mb-6 flex items-center text-slate-200">
+                <svg class="w-5 h-5 mr-2 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                Throughput em Tempo Real (msg/s)
+            </h2>
+            <div class="relative h-[400px] w-full">
+                <canvas id="throughputChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const ctx = document.getElementById('throughputChart').getContext('2d');
+        
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: Array(40).fill(''),
+                datasets: [
+                    {
+                        label: 'Publish Rate (msg/s ENTRANDO)',
+                        data: Array(40).fill(0),
+                        borderColor: '#38bdf8',
+                        backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        fill: true,
+                        pointRadius: 0
+                    },
+                    {
+                        label: 'Deliver Rate (msg/s SAINDO)',
+                        data: Array(40).fill(0),
+                        borderColor: '#a78bfa',
+                        backgroundColor: 'rgba(167, 139, 250, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        fill: true,
+                        pointRadius: 0
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 0 },
+                plugins: {
+                    legend: { labels: { color: '#cbd5e1', font: { family: 'Inter', size: 13 } } }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: 'rgba(51, 65, 85, 0.5)', drawBorder: false },
+                        ticks: { color: '#94a3b8', font: { family: 'ui-monospace' } }
+                    },
+                    x: {
+                        grid: { display: false },
+                        ticks: { display: false }
+                    }
+                }
+            }
+        });
+
+        const eventSource = new EventSource("/stream");
+        const statusInd = document.getElementById('status-indicator');
+
+        eventSource.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            if (data.error) {
+                statusInd.classList.replace('text-emerald-400', 'text-amber-400');
+                statusInd.innerHTML = `<span class="h-2 w-2 mr-2 rounded-full bg-amber-500"></span> API Offline`;
+                return;
+            } else {
+                statusInd.classList.replace('text-amber-400', 'text-emerald-400');
+                statusInd.classList.replace('text-red-400', 'text-emerald-400');
+                statusInd.innerHTML = `<span class="relative flex h-2 w-2 mr-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span> Status OK`;
+            }
+
+            document.getElementById('val-consumers').innerText = data.consumers || '0';
+            document.getElementById('val-connections').innerText = data.connections || '0';
+            document.getElementById('val-ready').innerText = data.messages_ready || '0';
+            document.getElementById('val-unacked').innerText = data.messages_unacked || '0';
+
+            const pubRate = data.publish_rate || 0;
+            const delRate = data.deliver_rate || 0;
+
+            chart.data.datasets[0].data.shift();
+            chart.data.datasets[0].data.push(pubRate);
+
+            chart.data.datasets[1].data.shift();
+            chart.data.datasets[1].data.push(delRate);
+            
+            chart.update();
+        };
+
+        eventSource.onerror = function() {
+            statusInd.classList.replace('text-emerald-400', 'text-red-400');
+            statusInd.innerHTML = `<span class="h-2 w-2 mr-2 rounded-full bg-red-500"></span> Conexão Perdida`;
+        };
+    </script>
+</body>
+</html>
