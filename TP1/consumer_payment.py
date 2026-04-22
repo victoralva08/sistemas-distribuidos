@@ -58,13 +58,6 @@ def processar_pagamento(ch, method, properties, body):
     # Simula o tempo que um sistema real de pagamento levaria (5–50ms)
     time.sleep(random.uniform(0.005, 0.05))
 
-    # Simula recusa de pagamento em 2% dos casos (cartão sem limite, etc.)
-    if random.random() < 0.02:
-        print(f"  [PAGAMENTO] ❌ RECUSADO | {order_id} | R$ {amount:.2f}")
-        # requeue=False → não volta para a fila principal, vai para a DLQ
-        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-        return
-
     print(f"  [PAGAMENTO] ✅ Aprovado | {order_id} | R$ {amount:.2f} | Cliente {customer_id}")
     # Confirma que a mensagem foi processada com sucesso
     ch.basic_ack(delivery_tag=method.delivery_tag)

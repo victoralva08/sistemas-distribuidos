@@ -59,7 +59,7 @@ A solução que este projeto demonstra é o uso de um **Message Broker** (no cas
 Abra um terminal na pasta `TP1` e execute:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 **O que este comando faz:**
@@ -95,7 +95,7 @@ Com Quorum Queues, se um dos servidores cair, os outros dois já têm uma cópia
 Execute apenas na primeira vez:
 
 ```bash
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 ```
 
 **O que instala:**
@@ -111,7 +111,7 @@ pip install -r requirements.txt
 Abra um **novo terminal** (mantenha-o aberto durante toda a demonstração) e execute:
 
 ```bash
-python dashboard.py
+python3 dashboard.py
 ```
 
 **O que este comando faz:**
@@ -119,135 +119,77 @@ Sobe um servidor web local na porta 5000. Ele consulta a API interna do RabbitMQ
 
 Acesse no navegador: **http://localhost:5000**
 
-Você verá quatro métricas no topo e um gráfico em tempo real. Por enquanto estará tudo zerado, pois ainda não enviamos nenhum pedido.
+Você verá o **Mapa Topológico Interativo** da sua arquitetura (um diagrama de rede visual). Por enquanto os números de mensagens (`Msgs: 0`) nas filas estarão zerados e não haverá nenhum "Consumer" conectado nas pontas, pois ainda não enviamos nenhum pedido.
 
 ---
 
-## PASSO 5 — O Roteiro de Demonstração
+## PASSO 5 — O Roteiro de Demonstração (Versão Clean)
 
-### 🎬 Cena 1: O Gargalo da Black Friday
+Siga este roteiro passo a passo na sua apresentação:
 
-Abra um **novo terminal** e execute:
+### 🎬 Cena 0: A Prova do Cluster Distribuído
+*Objetivo: Provar que não é um programa simples, mas uma infraestrutura de 3 servidores.*
 
-```bash
-python producer.py --total 5000
-```
-
-**O que este comando faz:**
-O produtor conecta ao RabbitMQ e, em velocidade máxima, gera e envia **5.000 pedidos** fictícios. Cada pedido é um JSON com: ID do pedido, ID do cliente, produto, quantidade e valor. Ele distribui aleatoriamente entre as 4 routing keys (pagamento, estoque, notificação, auditoria) e encerra quando termina.
-
-**O que você verá no dashboard:**
-- A métrica **"Msgs em Fila (Ready)"** vai subir para milhares
-- A linha **azul (Publish Rate)** vai disparar e depois cair quando o produtor terminar
-- As filas estão cheias de pedidos aguardando — mas nenhum consumer está processando ainda
-
-**O que dizer:**
-> *"5.000 pedidos chegaram ao sistema em segundos. Eles estão todos salvos e seguros dentro das filas do RabbitMQ. Nenhum se perdeu, e a aplicação não travou."*
+1. No terminal, digite: `docker exec rabbit1 rabbitmqctl cluster_status`
+2. Mostre a seção `Running Nodes` com os 3 servidores listados.
+> *"Professor, antes de rodar o código, repare que temos 3 nós independentes rodando e se comunicando perfeitamente em Quórum."*
 
 ---
 
-### 🎬 Cena 2: O Processamento (Um Worker)
+### 🎬 Cena 1: O Envio em Massa e a "Caixa Preta"
+*Objetivo: Mostrar o produtor gerando carga e provar que o Docker salvou tudo fisicamente.*
 
-Abra um **novo terminal** e execute:
-
-```bash
-python consumer_payment.py
-```
-
-**O que este comando faz:**
-Liga o serviço de pagamento. Ele se conecta à fila `orders.payment` e começa a retirar mensagens uma por uma. Para cada pedido, simula um tempo de processamento (5–50ms) e, com 2% de chance, rejeita o pagamento — esses pedidos rejeitados vão automaticamente para a **Dead Letter Queue (DLQ)**, uma fila separada de mensagens com falha.
-
-**O que você verá no dashboard:**
-- A métrica **"Msgs em Fila"** começa a **cair**
-- A linha **roxa (Deliver Rate)** aparece, mostrando a velocidade de consumo
-- A métrica **"Consumers Ativos"** mostra 1
-
-**O que dizer:**
-> *"O serviço de pagamento começou a trabalhar. Você pode ver o throughput: quantas mensagens por segundo ele consegue processar sozinho."*
+1. **Terminal:** `python3 producer.py --total 5000`
+2. **Dashboard Topológico:** Mostre as bolinhas preenchendo as 3 filas (Pagamento, Estoque, Notificação).
+> *"5.000 pedidos chegaram e os consumers estão desligados. Onde estão os dados? Estão salvos nos discos rígidos do nosso cluster Docker."*
+3. **A Prova Real:** 
+   - Abra o painel nativo: **http://localhost:15672** (admin/admin123)
+   - Vá na aba **Queues** > clique em **orders.payment**
+   - Desça até **Get Messages** > mude Requeue para **Yes** > clique em **Get Message(s)**.
+   - Mostre o JSON cru com os dados do cliente na tela!
 
 ---
 
-### 🎬 Cena 3: Escalabilidade Horizontal
+### 🎬 Cena 2: O Processamento e a Escalabilidade
+*Objetivo: Mostrar os workers esvaziando a fila e como escalar adicionando mais máquinas.*
 
-Enquanto o producer ainda está enviando (use `--total 100000` para ter tempo), abra **mais 2 terminais** e execute o mesmo comando em cada um:
+1. **Terminal 1:** `python3 consumer_payment.py`
+   - *No Dashboard:* Uma estrela amarela aparece. O número de mensagens da fila cai e o contador `Feito:` sobe rapidamente.
+2. **Terminal 2 e 3:** Abra novos terminais e rode `python3 consumer_payment.py` neles também.
+   - *No Dashboard:* A estrela muda para `consumer (3)`. A fila esvazia 3x mais rápido.
+> *"Não precisamos de servidores mais potentes, apenas adicionamos mais workers na mesma fila. O RabbitMQ divide os pedidos automaticamente sem duplicidade."*
 
-```bash
-# Terminal 2
-python consumer_payment.py
+---
 
-# Terminal 3
-python consumer_payment.py
-```
+### 🎬 Cena 3: Os Microsserviços
+*Objetivo: Mostrar arquitetura desacoplada.*
 
-**O que este comando faz:**
-Você está rodando 3 instâncias do mesmo serviço simultaneamente. O RabbitMQ distribui os pedidos entre eles automaticamente — nenhum pedido é processado duas vezes.
-
-**O que você verá no dashboard:**
-- **"Consumers Ativos"** sobe para 3
-- A linha roxa sobe proporcionalmente — o throughput quase triplica
-- A fila esvazia muito mais rápido
-
-**O que dizer:**
-> *"Isso é escalabilidade horizontal. Não precisamos de um servidor mais potente — só adicionamos mais workers. E removemos eles igualmente fácil: basta fechar o terminal."*
+1. **Terminais Novos:** Rode `python3 consumer_stock.py` e `python3 consumer_notification.py`.
+   - *No Dashboard:* Novas estrelas aparecem e começam a drenar as outras duas filas de forma totalmente paralela e independente.
 
 ---
 
 ### 🎬 Cena 4: Tolerância a Falhas (O Grand Finale)
+*Objetivo: Matar um servidor ao vivo para provar a resiliência.*
 
-Com tudo rodando — producer enviando e consumers processando — abra um **novo terminal** e execute:
+1. Com todos os scripts rodando e o dashboard animado, vá no terminal e chute o balde:
+   - `docker stop rabbit2`
+2. **No Dashboard:** O sistema pisca por 1 segundo e volta ao normal trabalhando com 2 nós. Nenhum pedido é perdido.
+> *"Derrubar um servidor em um banco tradicional seria catastrófico. Como exigimos Quorum Queues, o Algoritmo Raft manteve os dados seguros nos nós sobreviventes!"*
 
-```bash
-docker stop rabbit2
-```
-
-**O que este comando faz:**
-Mata na força bruta um dos nós do cluster RabbitMQ, simulando uma falha de servidor em produção.
-
-**O que você verá no dashboard:**
-O sistema pode piscar por 1–2 segundos enquanto os clients reconectam, mas o processamento **continua normalmente** com os nós `rabbit1` e `rabbit3`.
-
-**O que dizer:**
-> *"Em um banco de dados tradicional, derrubar o servidor seria o fim. Com Quorum Queues, os dados já estavam replicados nos outros dois nós. O sistema sobreviveu sem perder nenhum pedido."*
-
-Para subir o nó novamente:
-```bash
-docker start rabbit2
-```
-
----
-
-### 🎬 Cena Extra: Os Outros Consumers
-
-Você pode abrir terminais adicionais para ver os outros serviços funcionando em paralelo:
-
-```bash
-# Serviço de reserva de estoque
-python consumer_stock.py
-
-# Serviço de notificações ao cliente
-python consumer_notification.py
-
-# Serviço de auditoria (registra TODOS os eventos)
-python consumer_audit.py
-```
-
-Cada um deles lê de sua fila específica de forma totalmente independente. O consumer de auditoria é especial: ele usa a routing key `order.#` (onde `#` captura qualquer coisa), então recebe uma cópia de **todas** as mensagens do sistema.
-
----
-
-## PASSO 6 — Benchmark Automatizado
+*(Para reviver o nó depois: `docker start rabbit2`)*
 
 Se quiser medir o throughput sem fazer a demonstração manual, use:
 
 ```bash
 # Testa com 1 consumer e 10.000 mensagens
-python benchmark.py --msgs 10000 --consumers 1
+python3 benchmark.py --msgs 10000 --consumers 1
 
 # Testa com 4 consumers (rode depois do anterior)
-python benchmark.py --msgs 10000 --consumers 4
+python3 benchmark.py --msgs 10000 --consumers 4
 
 # Gera um gráfico PNG comparando os resultados
-python benchmark.py --plot-only
+python3 benchmark.py --plot-only
 ```
 
 **O que acontece:**
@@ -255,19 +197,20 @@ O script limpa as filas, roda o producer e sobe N consumers automaticamente, med
 
 ---
 
-## Entendendo o Dashboard
+## Entendendo o Dashboard (Mapa Topológico)
 
-| Indicador | O que significa |
+A nova interface gráfica desenha toda a sua arquitetura em tempo real. É interativa, você pode arrastar os ícones e dar zoom.
+
+| Indicador Visual | O que significa |
 |---|---|
-| 🟢 **Status OK** | O RabbitMQ está respondendo normalmente |
-| 🟡 **API Offline** | O RabbitMQ não está acessível no momento |
-| 🔴 **Conexão Perdida** | O dashboard perdeu conexão com o servidor Flask |
-| **Consumers Ativos** | Quantos workers estão conectados e ouvindo as filas |
-| **Conexões AMQP** | Total de conexões abertas com o RabbitMQ (producers + consumers) |
-| **Msgs em Fila (Ready)** | Pedidos aguardando na fila — o "estoque de trabalho" |
-| **Msgs Unacked** | Pedidos que saíram da fila e estão sendo processados agora |
-| **Linha Azul** | Publish Rate: velocidade de entrada de mensagens (msg/s) |
-| **Linha Roxa** | Deliver Rate: velocidade de processamento pelos consumers (msg/s) |
+| 🟢 **Status Conectado** | O dashboard está recebendo dados em tempo real da API do RabbitMQ |
+| 🟡/🔴 **API Offline** | O servidor perdeu conexão (O RabbitMQ pode ter caído) |
+| 🔵 **Círculo Verde (producer)** | O gerador das mensagens (no caso, seu `producer.py`) |
+| 🔺 **Triângulo Laranja (exchange)** | O roteador do RabbitMQ (`orders.exchange`) que decide para qual fila a mensagem vai |
+| 🟦 **Caixa Azul (queue)** | Suas 4 filas. O contador `Msgs:` mostra em tempo real quantas mensagens estão aguardando nela |
+| ⭐ **Estrela Amarela (consumer)** | O seu "worker". Ela só aparece conectada a uma fila quando você liga o script correspondente (ex: `consumer_payment.py`). Mostra também quantas mensagens já processou (`Feito: X`) |
+| 🔵🟡 **Bolinhas (Animações)** | Mostram o tráfego em tempo real: **Cyan/Laranja** (entrando nas filas), **Amarelo** (sendo processado pelo consumer). |
+| **Setas Negras** | O caminho da mensagem. As setas entre o exchange e a fila indicam a `Routing Key` (ex: `payment`, `order.#`) |
 
 ---
 
@@ -277,30 +220,30 @@ Para parar os consumers: `Ctrl+C` em cada terminal.
 
 Para desligar o cluster Docker:
 ```bash
-docker-compose down
+docker compose down
 ```
 
 Para desligar **e apagar os dados** das filas (útil para começar do zero):
 ```bash
-docker-compose down -v
+docker compose down -v
 ```
 
 ---
 
 ## Deploy com Docker Swarm (Orquestrador)
 
-O `docker-compose` é ótimo para desenvolvimento local, mas **não é um orquestrador**. O **Docker Swarm** é: ele gerencia os containers automaticamente, reinicia serviços que caem, e foi projetado para rodar em múltiplas máquinas.
+O **Docker Compose** é ótimo para desenvolvimento local, mas **não é um orquestrador**. O **Docker Swarm** é: ele gerencia os containers automaticamente, reinicia serviços que caem, e foi projetado para rodar em múltiplas máquinas.
 
 O projeto tem um arquivo próprio para isso: `docker-stack.yml`.
 
 ### O que muda na prática?
 
-| | docker-compose | Docker Swarm |
+| | Docker Compose | Docker Swarm |
 |---|---|---|
 | Onde roda | Só na sua máquina | Uma ou várias máquinas |
 | Rede | Bridge (local) | Overlay (entre máquinas) |
 | Restart automático | Não | Sim |
-| Comando para subir | `docker-compose up` | `docker stack deploy` |
+| Comando para subir | `docker compose up` | `docker stack deploy` |
 | Ver serviços | `docker ps` | `docker service ls` |
 
 ### Passo a Passo com Swarm

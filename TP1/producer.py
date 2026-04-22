@@ -34,7 +34,6 @@ ROUTING_KEYS = [
     "order.payment.new",    # → fila de pagamento
     "order.stock.reserve",  # → fila de estoque
     "order.notify.confirm", # → fila de notificação
-    "order.audit.log",      # → fila de auditoria (recebe TUDO)
 ]
 
 # Produtos fictícios para simular pedidos realistas
@@ -83,7 +82,6 @@ def criar_infraestrutura(channel):
     queue_config = {
         "x-queue-type":           "quorum",
         "x-dead-letter-exchange": "orders.dlx",
-        "x-message-ttl":          60000,
     }
 
     # Lista de filas: (nome da fila, padrão de routing key que ela aceita)
@@ -91,7 +89,6 @@ def criar_infraestrutura(channel):
         ("orders.payment",      "order.payment.*"),   # só pagamentos
         ("orders.stock",        "order.stock.*"),      # só estoque
         ("orders.notification", "order.notify.*"),     # só notificações
-        ("orders.audit",        "order.#"),            # o "#" significa TUDO
     ]
 
     for nome_fila, padrao in filas:

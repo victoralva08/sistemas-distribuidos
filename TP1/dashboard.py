@@ -27,7 +27,8 @@ import time
 app = Flask(__name__)
 
 # URL da API de gerenciamento interna do RabbitMQ (Management Plugin)
-RABBITMQ_API = "http://localhost:15672/api/overview"
+RABBITMQ_API_OVERVIEW = "http://localhost:15672/api/overview"
+RABBITMQ_API_QUEUES = "http://localhost:15672/api/queues"
 AUTH = ("admin", "admin123")
 
 
@@ -39,32 +40,34 @@ def index():
 
 def buscar_metricas():
     """
-    Consulta a API do RabbitMQ e retorna as métricas mais importantes
-    em um dicionário simples.
-    Se o RabbitMQ estiver offline, retorna um dicionário com chave 'error'.
+    Consulta a API do RabbitMQ e retorna os dados das filas e taxas globais.
     """
     try:
-        resposta = requests.get(RABBITMQ_API, auth=AUTH, timeout=2)
-        resposta.raise_for_status()
-        dados = resposta.json()
+        # Pega as filas
+        res_queues = requests.get(RABBITMQ_API_QUEUES, auth=AUTH, timeout=2)
+        res_queues.raise_for_status()
+        filas = res_queues.json()
 
-        estatisticas_msgs = dados.get("message_stats", {})
-        totais_filas      = dados.get("queue_totals", {})
-        totais_objetos    = dados.get("object_totals", {})
+        # Pega as taxas (publish / deliver globais)
+        res_overview = requests.get(RABBITMQ_API_OVERVIEW, auth=AUTH, timeout=2)
+        res_overview.raise_for_status()
+        overview = res_overview.json()
+        stats = overview.get("message_stats", {})
+
+        dados_filas = {}
+        for fila in filas:
+            nome = fila.get("name")
+            dados_filas[nome] = {
+                "messages": fila.get("messages_ready", 0),
+                "consumers": fila.get("consumers", 0),
+                "acked": fila.get("message_stats", {}).get("ack", 0) if isinstance(fila.get("message_stats"), dict) else 0
+            }
 
         return {
-            # Velocidade de entrada (mensagens publicadas por segundo)
-            "publish_rate": estatisticas_msgs.get("publish_details", {}).get("rate", 0.0),
-            # Velocidade de saída (mensagens entregues aos consumers por segundo)
-            "deliver_rate": estatisticas_msgs.get("deliver_get_details", {}).get("rate", 0.0),
-            # Mensagens aguardando para serem consumidas
-            "messages_ready": totais_filas.get("messages_ready", 0),
-            # Mensagens que saíram da fila mas ainda não foram confirmadas pelo consumer
-            "messages_unacked": totais_filas.get("messages_unacknowledged", 0),
-            # Quantidade de conexões AMQP abertas
-            "connections": totais_objetos.get("connections", 0),
-            # Quantidade de consumers ativos em todas as filas
-            "consumers": totais_objetos.get("consumers", 0),
+            "status": "ok",
+            "publish_rate": stats.get("publish_details", {}).get("rate", 0.0),
+            "deliver_rate": stats.get("deliver_get_details", {}).get("rate", 0.0),
+            "queues": dados_filas
         }
     except Exception as e:
         return {"error": str(e)}

@@ -56,12 +56,6 @@ def processar_notificacao(ch, method, properties, body):
     # Simula a latência de envio de uma notificação (2–20ms)
     time.sleep(random.uniform(0.002, 0.02))
 
-    # Simula falha de entrega em 1% dos casos (servidor de e-mail fora, etc.)
-    if random.random() < 0.01:
-        print(f"  [NOTIFICAÇÃO] ❌ FALHA na entrega | Pedido {order_id}")
-        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-        return
-
     canal = random.choice(CANAIS)
     print(f"  [NOTIFICAÇÃO] ✅ {canal.upper()} enviado | {order_id} | Cliente {customer_id}")
     ch.basic_ack(delivery_tag=method.delivery_tag)

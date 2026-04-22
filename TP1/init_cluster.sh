@@ -1,7 +1,7 @@
 #!/bin/bash
 # init_cluster.sh
 # Une os 3 nós RabbitMQ em cluster e ativa Quorum Queues
-# Execute após: docker-compose up -d
+# Execute após: docker compose up -d
 # Aguarde ~30 segundos para os nós inicializarem antes de rodar este script
 
 set -e
@@ -41,7 +41,7 @@ docker exec rabbit1 rabbitmqctl cluster_status
 echo ""
 echo "==> Ativando Quorum Queues como padrao..."
 docker exec rabbit1 rabbitmqctl set_policy quorum-policy "^orders\." \
-  '{"queue-mode":"lazy"}' --apply-to queues --priority 1
+  "{\"queue-mode\":\"lazy\"}" --apply-to queues --priority 1
 
 echo ""
 echo "Cluster pronto! Acesse o Management UI em: http://localhost:15672"

@@ -55,13 +55,6 @@ def processar_estoque(ch, method, properties, body):
     # Simula o tempo de consulta ao sistema de estoque (10–30ms)
     time.sleep(random.uniform(0.01, 0.03))
 
-    # Simula falta de estoque em 3% dos casos
-    if random.random() < 0.03:
-        print(f"  [ESTOQUE] ❌ SEM ESTOQUE | {product_id} | Pedido {order_id}")
-        # requeue=False → não volta para a fila principal, vai para a DLQ
-        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-        return
-
     print(f"  [ESTOQUE] ✅ Reservado | {order_id} | {quantity}x {product_id} | Cliente {customer_id}")
     ch.basic_ack(delivery_tag=method.delivery_tag)
 

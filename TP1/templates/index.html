@@ -3,147 +3,257 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RabbitMQ - E-Commerce Dashboard</title>
+    <title>RabbitMQ Topology Map</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <style>
-        body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', system-ui, sans-serif; }
-        .card { background-color: #1e293b; border-radius: 0.5rem; padding: 1.5rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); border: 1px solid #334155; }
-        .metric-value { font-size: 2.25rem; font-weight: 700; color: #38bdf8; }
-        .metric-label { font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 0.25rem;}
+        body { background-color: #ffffff; color: #1e293b; font-family: 'Inter', system-ui, sans-serif; margin: 0; padding: 0; height: 100vh; display: flex; flex-direction: column; }
+        header { padding: 1rem 2rem; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background-color: #f8fafc; }
+        .main-container { display: flex; flex: 1; overflow: hidden; }
+        .legend { width: 120px; border-right: 2px solid #1e293b; padding: 1.5rem 0; display: flex; flex-direction: column; align-items: center; gap: 2rem; background: #ffffff; overflow-y: auto; }
+        .network-container { flex: 1; position: relative; background-color: #ffffff; }
+        #network { width: 100%; height: 100%; }
+        
+        /* Legend Shapes */
+        .legend-item { display: flex; flex-direction: column; align-items: center; font-size: 0.8rem; font-weight: 600; color: #0f172a; gap: 0.5rem; text-align: center; }
+        .shape-exchange { width: 0; height: 0; border-left: 14px solid transparent; border-right: 14px solid transparent; border-bottom: 24px solid #fb923c; }
+        .shape-queue { width: 32px; height: 20px; background-color: #7dd3fc; border: 2px solid #0284c7; border-radius: 3px; }
+        .shape-producer { width: 26px; height: 26px; border-radius: 50%; background-color: #5eead4; border: 2px solid #0f766e; }
+        .shape-consumer { 
+            width: 28px; height: 28px; background-color: #fde047; border: 2px solid #854d0e; 
+            clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+        }
     </style>
 </head>
-<body class="p-8">
-    <div class="max-w-7xl mx-auto">
-        <header class="mb-8 flex flex-col md:flex-row justify-between items-start md:items-end border-b border-slate-700 pb-4 gap-4">
-            <div>
-                <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-blue-500">TP01 Dashboard</h1>
-                <p class="text-slate-400 mt-1">Monitoramento em Tempo Real do Cluster RabbitMQ</p>
-            </div>
-            <div id="status-indicator" class="flex items-center text-sm font-semibold text-emerald-400 bg-slate-800 px-3 py-1.5 rounded-full border border-slate-700">
-                <span class="relative flex h-2 w-2 mr-2">
-                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                </span>
-                Conectado ao Node
-            </div>
-        </header>
+<body>
+    <header>
+        <div>
+            <h1 class="text-2xl font-bold text-slate-800">Mapa Topológico RabbitMQ</h1>
+            <p class="text-sm text-slate-500 font-medium">Monitoramento em Tempo Real do TP01</p>
+        </div>
+        <div id="status-indicator" class="flex items-center text-sm font-semibold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-200">
+            <span class="relative flex h-2 w-2 mr-2">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            Conectado
+        </div>
+    </header>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            <div class="card">
-                <div class="metric-label">Consumers Ativos</div>
-                <div class="metric-value font-mono" id="val-consumers">0</div>
+    <div class="main-container">
+        <!-- Barra Lateral: Legenda -->
+        <div class="legend">
+            <div class="legend-item">
+                <div class="shape-producer"></div>
+                <span>producer</span>
             </div>
-            <div class="card">
-                <div class="metric-label">Conexões AMQP</div>
-                <div class="metric-value font-mono" id="val-connections" style="color: #a78bfa;">0</div>
+            <div class="legend-item">
+                <div class="shape-exchange"></div>
+                <span>exchange</span>
             </div>
-            <div class="card">
-                <div class="metric-label">Msgs em Fila (Ready)</div>
-                <div class="metric-value font-mono" id="val-ready" style="color: #fbbf24;">0</div>
+            <div class="legend-item">
+                <div class="shape-queue"></div>
+                <span>queue</span>
             </div>
-            <div class="card">
-                <div class="metric-label">Msgs Unacked (Proc)</div>
-                <div class="metric-value font-mono" id="val-unacked" style="color: #f87171;">0</div>
+            <div class="legend-item">
+                <div class="shape-consumer"></div>
+                <span>consumer</span>
             </div>
         </div>
 
-        <div class="card mb-8">
-            <h2 class="text-lg font-semibold mb-6 flex items-center text-slate-200">
-                <svg class="w-5 h-5 mr-2 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
-                Throughput em Tempo Real (msg/s)
-            </h2>
-            <div class="relative h-[400px] w-full">
-                <canvas id="throughputChart"></canvas>
-            </div>
+        <!-- Área Principal: Gráfico de Rede -->
+        <div class="network-container">
+            <div id="network"></div>
         </div>
     </div>
 
     <script>
-        const ctx = document.getElementById('throughputChart').getContext('2d');
-        
-        const chart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: Array(40).fill(''),
-                datasets: [
-                    {
-                        label: 'Publish Rate (msg/s ENTRANDO)',
-                        data: Array(40).fill(0),
-                        borderColor: '#38bdf8',
-                        backgroundColor: 'rgba(56, 189, 248, 0.1)',
-                        borderWidth: 2,
-                        tension: 0.3,
-                        fill: true,
-                        pointRadius: 0
-                    },
-                    {
-                        label: 'Deliver Rate (msg/s SAINDO)',
-                        data: Array(40).fill(0),
-                        borderColor: '#a78bfa',
-                        backgroundColor: 'rgba(167, 139, 250, 0.1)',
-                        borderWidth: 2,
-                        tension: 0.3,
-                        fill: true,
-                        pointRadius: 0
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                animation: { duration: 0 },
-                plugins: {
-                    legend: { labels: { color: '#cbd5e1', font: { family: 'Inter', size: 13 } } }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        grid: { color: 'rgba(51, 65, 85, 0.5)', drawBorder: false },
-                        ticks: { color: '#94a3b8', font: { family: 'ui-monospace' } }
-                    },
-                    x: {
-                        grid: { display: false },
-                        ticks: { display: false }
-                    }
+        // Configuração dos Nós (Nodes)
+        const nodes = new vis.DataSet([
+            { id: 'producer', label: 'producer', shape: 'circle', color: { background: '#5eead4', border: '#0f766e' }, font: { face: 'Inter', size: 14 }, level: 0 },
+            { id: 'exchange', label: 'ex\n(orders.exchange)', shape: 'triangle', color: { background: '#fb923c', border: '#c2410c' }, font: { face: 'Inter', size: 14 }, level: 1 },
+            
+            // Filas Principais
+            { id: 'q_payment', label: 'orders.payment\nMsgs: 0', shape: 'box', color: { background: '#7dd3fc', border: '#0284c7' }, font: { face: 'Inter', size: 14 }, margin: 10, level: 2 },
+            { id: 'q_stock', label: 'orders.stock\nMsgs: 0', shape: 'box', color: { background: '#7dd3fc', border: '#0284c7' }, font: { face: 'Inter', size: 14 }, margin: 10, level: 2 },
+            { id: 'q_notification', label: 'orders.notification\nMsgs: 0', shape: 'box', color: { background: '#7dd3fc', border: '#0284c7' }, font: { face: 'Inter', size: 14 }, margin: 10, level: 2 },
+            
+            // Consumidores (inicialmente invisíveis)
+            { id: 'c_payment', label: 'consumer1', shape: 'star', color: { background: '#fde047', border: '#854d0e' }, font: { face: 'Inter', size: 14 }, hidden: true, size: 20, level: 3 },
+            { id: 'c_stock', label: 'consumer1', shape: 'star', color: { background: '#fde047', border: '#854d0e' }, font: { face: 'Inter', size: 14 }, hidden: true, size: 20, level: 3 },
+            { id: 'c_notification', label: 'consumer1', shape: 'star', color: { background: '#fde047', border: '#854d0e' }, font: { face: 'Inter', size: 14 }, hidden: true, size: 20, level: 3 }
+        ]);
+
+        // Configuração das Conexões (Edges)
+        const edges = new vis.DataSet([
+            { id: 'e_prod_ex', from: 'producer', to: 'exchange', arrows: 'to', color: { color: '#000000' }, width: 2 },
+            
+            // Ligações Exchange -> Queues
+            { id: 'e_ex_pay', from: 'exchange', to: 'q_payment', label: 'payment', arrows: 'to', color: { color: '#000000' }, font: { align: 'top', face: 'Inter' } },
+            { id: 'e_ex_stk', from: 'exchange', to: 'q_stock', label: 'stock', arrows: 'to', color: { color: '#000000' }, font: { align: 'top', face: 'Inter' } },
+            { id: 'e_ex_not', from: 'exchange', to: 'q_notification', label: 'notification', arrows: 'to', color: { color: '#000000' }, font: { align: 'top', face: 'Inter' } },
+            
+            // Ligações Queues -> Consumers
+            { id: 'e_pay_c', from: 'q_payment', to: 'c_payment', arrows: 'to', color: { color: '#000000' } },
+            { id: 'e_stk_c', from: 'q_stock', to: 'c_stock', arrows: 'to', color: { color: '#000000' } },
+            { id: 'e_not_c', from: 'q_notification', to: 'c_notification', arrows: 'to', color: { color: '#000000' } }
+        ]);
+
+        // Configuração da Rede Vis.js
+        const container = document.getElementById('network');
+        const data = { nodes: nodes, edges: edges };
+        const options = {
+            layout: {
+                hierarchical: {
+                    direction: 'LR',
+                    sortMethod: 'directed',
+                    levelSeparation: 250,
+                    nodeSpacing: 100
                 }
+            },
+            physics: false,
+            interaction: { dragNodes: true, zoomView: true, dragView: true },
+            edges: { smooth: false } // Linhas retas puras para que a animação linear passe EXATAMENTE por cima delas
+        };
+
+        const network = new vis.Network(container, data, options);
+
+        // --- SISTEMA DE ANIMAÇÃO DE BOLINHAS ---
+        let particles = [];
+        
+        function spawnParticle(fromId, toId, color) {
+            particles.push({
+                from: fromId,
+                to: toId,
+                progress: 0,
+                color: color,
+                speed: 0.01 + Math.random() * 0.02 // Velocidade variável
+            });
+        }
+
+        // Desenha as partículas por cima do canvas
+        network.on("afterDrawing", function (ctx) {
+            const pos = network.getPositions();
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.progress += p.speed;
+                if (p.progress >= 1) {
+                    particles.splice(i, 1);
+                    continue;
+                }
+                
+                let pos1 = pos[p.from];
+                let pos2 = pos[p.to];
+                if (!pos1 || !pos2) continue;
+
+                // Interpolação linear da posição
+                let x = pos1.x + (pos2.x - pos1.x) * p.progress;
+                let y = pos1.y + (pos2.y - pos1.y) * p.progress;
+
+                ctx.beginPath();
+                ctx.arc(x, y, 5, 0, 2 * Math.PI, false);
+                ctx.fillStyle = p.color;
+                ctx.fill();
+                ctx.lineWidth = 1;
+                ctx.strokeStyle = "#1e293b";
+                ctx.stroke();
             }
         });
 
+        // Loop de animação contínuo
+        function animate() {
+            if (particles.length > 0) {
+                network.redraw(); // Força o redrawn para animar
+            }
+            requestAnimationFrame(animate);
+        }
+        animate();
+        // ----------------------------------------
+
+        // SSE: Recebendo dados em tempo real
         const eventSource = new EventSource("/stream");
         const statusInd = document.getElementById('status-indicator');
 
+        function updateQueueStatus(queueName, nodeId, consumerId, queuesData) {
+            const qData = queuesData[queueName];
+            if (qData) {
+                const msgs = qData.messages || 0;
+                const consumersCount = qData.consumers || 0;
+                const acked = qData.acked || 0;
+                
+                nodes.update({ id: nodeId, label: queueName + '\nMsgs: ' + msgs });
+                
+                if (consumersCount > 0 && consumerId) {
+                    nodes.update({ id: consumerId, hidden: false, label: 'consumer (' + consumersCount + ')\nFeito: ' + acked });
+                } else if(consumerId) {
+                    nodes.update({ id: consumerId, hidden: true });
+                }
+            }
+        }
+
         eventSource.onmessage = function(event) {
-            const data = JSON.parse(event.data);
-            if (data.error) {
-                statusInd.classList.replace('text-emerald-400', 'text-amber-400');
+            const result = JSON.parse(event.data);
+            
+            if (result.error) {
+                statusInd.classList.replace('text-emerald-600', 'text-amber-600');
+                statusInd.classList.replace('bg-emerald-50', 'bg-amber-50');
+                statusInd.classList.replace('border-emerald-200', 'border-amber-200');
                 statusInd.innerHTML = `<span class="h-2 w-2 mr-2 rounded-full bg-amber-500"></span> API Offline`;
                 return;
             } else {
-                statusInd.classList.replace('text-amber-400', 'text-emerald-400');
-                statusInd.classList.replace('text-red-400', 'text-emerald-400');
-                statusInd.innerHTML = `<span class="relative flex h-2 w-2 mr-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span> Status OK`;
+                statusInd.classList.replace('text-amber-600', 'text-emerald-600');
+                statusInd.classList.replace('text-red-600', 'text-emerald-600');
+                statusInd.classList.replace('bg-amber-50', 'bg-emerald-50');
+                statusInd.classList.replace('bg-red-50', 'bg-emerald-50');
+                statusInd.classList.replace('border-amber-200', 'border-emerald-200');
+                statusInd.classList.replace('border-red-200', 'border-emerald-200');
+                statusInd.innerHTML = `<span class="relative flex h-2 w-2 mr-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span> Conectado`;
             }
 
-            document.getElementById('val-consumers').innerText = data.consumers || '0';
-            document.getElementById('val-connections').innerText = data.connections || '0';
-            document.getElementById('val-ready').innerText = data.messages_ready || '0';
-            document.getElementById('val-unacked').innerText = data.messages_unacked || '0';
+            if (result.status === "ok" && result.queues) {
+                updateQueueStatus('orders.payment', 'q_payment', 'c_payment', result.queues);
+                updateQueueStatus('orders.stock', 'q_stock', 'c_stock', result.queues);
+                updateQueueStatus('orders.notification', 'q_notification', 'c_notification', result.queues);
+                
+                // --- GERAÇÃO DE BOLINHAS BASEADO NAS TAXAS ---
+                const pRate = result.publish_rate || 0;
+                const dRate = result.deliver_rate || 0;
 
-            const pubRate = data.publish_rate || 0;
-            const delRate = data.deliver_rate || 0;
+                // Spawna bolinhas entrando (Producer -> Exchange)
+                if (pRate > 0) {
+                    let amount = Math.min(Math.floor(pRate / 10) + 1, 5); // limite de max partículas visuais
+                    for(let i=0; i<amount; i++) spawnParticle('producer', 'exchange', '#5eead4');
+                    
+                    // Do Exchange para as filas aleatórias (simulando roteamento)
+                    const queueIds = ['q_payment', 'q_stock', 'q_notification'];
+                    for(let i=0; i<amount; i++) {
+                        let targetQ = queueIds[Math.floor(Math.random()*queueIds.length)];
+                        spawnParticle('exchange', targetQ, '#fb923c');
+                    }
+                }
 
-            chart.data.datasets[0].data.shift();
-            chart.data.datasets[0].data.push(pubRate);
-
-            chart.data.datasets[1].data.shift();
-            chart.data.datasets[1].data.push(delRate);
-            
-            chart.update();
+                // Spawna bolinhas saindo (Queues -> Consumers)
+                if (dRate > 0) {
+                    let amount = Math.min(Math.floor(dRate / 10) + 1, 5);
+                    const consumers = [];
+                    if(!nodes.get('c_payment').hidden) consumers.push({q: 'q_payment', c: 'c_payment'});
+                    if(!nodes.get('c_stock').hidden) consumers.push({q: 'q_stock', c: 'c_stock'});
+                    if(!nodes.get('c_notification').hidden) consumers.push({q: 'q_notification', c: 'c_notification'});
+                    
+                    for(let i=0; i<amount; i++) {
+                        if (consumers.length > 0) {
+                            let pair = consumers[Math.floor(Math.random()*consumers.length)];
+                            spawnParticle(pair.q, pair.c, '#fde047');
+                        }
+                    }
+                }
+            }
         };
 
         eventSource.onerror = function() {
-            statusInd.classList.replace('text-emerald-400', 'text-red-400');
+            statusInd.classList.replace('text-emerald-600', 'text-red-600');
+            statusInd.classList.replace('bg-emerald-50', 'bg-red-50');
+            statusInd.classList.replace('border-emerald-200', 'border-red-200');
             statusInd.innerHTML = `<span class="h-2 w-2 mr-2 rounded-full bg-red-500"></span> Conexão Perdida`;
         };
     </script>
