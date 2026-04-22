@@ -1,51 +1,100 @@
 """
-consumer_payment.py – Processa a fila orders.payment.
-Simula validação e cobrança de pagamento, salvando no PostgreSQL.
+consumer_payment.py
+-------------------
+CONSUMIDOR DE PAGAMENTO
+
+Este script fica "escutando" a fila orders.payment esperando pedidos chegarem.
+Quando um pedido chega, ele simula a validação e cobrança do pagamento.
+
+Como funciona:
+  1. Conecta ao RabbitMQ
+  2. Se registra na fila orders.payment
+  3. Para cada pedido recebido, valida e decide se aprova ou rejeita
+  4. Envia ACK (confirmação) se aprovado, ou NACK (rejeição) se recusado
+     → Mensagens recusadas vão automaticamente para a Dead Letter Queue (DLQ)
+
+Execute com:
+  python consumer_payment.py
 """
 
+import pika
+import json
 import time
 import random
-from base_consumer import BaseConsumer
+
+# ── Configurações ──────────────────────────────────────────────────
+RABBITMQ_HOST = "localhost"
+RABBITMQ_USER = "admin"
+RABBITMQ_PASS = "admin123"
+FILA = "orders.payment"
 
 
-class PaymentConsumer(BaseConsumer):
-    queue_name   = "orders.payment"
-    consumer_tag = "PAYMENT"
-    prefetch_count = 10
+def conectar():
+    """Abre e retorna uma conexão com o RabbitMQ."""
+    credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
+    params = pika.ConnectionParameters(
+        host=RABBITMQ_HOST,
+        credentials=credentials,
+        heartbeat=600,
+    )
+    return pika.BlockingConnection(params)
 
-    def process(self, payload: dict, ch, method) -> bool:
-        order_id    = payload.get("order_id", "?")
-        customer_id = payload.get("customer_id", "?")
-        amount      = payload.get("amount", 0.0)
-        event_id    = payload.get("event_id", "")
 
-        # Simula tempo de processamento do pagamento (5–50ms)
-        time.sleep(random.uniform(0.005, 0.05))
+def processar_pagamento(ch, method, properties, body):
+    """
+    Função chamada automaticamente pelo RabbitMQ a cada mensagem recebida.
+    Parâmetros:
+      ch         → canal de comunicação (usado para confirmar/rejeitar)
+      method     → metadados da entrega (contém delivery_tag para o ACK)
+      properties → cabeçalhos da mensagem (não usamos aqui)
+      body       → conteúdo da mensagem em bytes
+    """
+    pedido = json.loads(body.decode("utf-8"))
 
-        # Simula falha em 2% dos casos (vai para DLQ)
-        if random.random() < 0.02:
-            print(f"  [PAYMENT][FALHA] Pedido {order_id} recusado (simulado)")
-            return False
+    order_id    = pedido.get("order_id", "?")
+    customer_id = pedido.get("customer_id", "?")
+    amount      = pedido.get("amount", 0.0)
 
-        # Persiste no PostgreSQL
-        try:
-            with self.db.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO payments (event_id, customer_id, amount, status)
-                    VALUES (%s, %s, %s, 'approved')
-                    """,
-                    (event_id, customer_id, amount),
-                )
-            self.db.commit()
-        except Exception as e:
-            self.db.rollback()
-            print(f"  [PAYMENT][DB ERRO] {e}")
-            return False
+    # Simula o tempo que um sistema real de pagamento levaria (5–50ms)
+    time.sleep(random.uniform(0.005, 0.05))
 
-        print(f"  [PAYMENT] Aprovado | {order_id} | R$ {amount:.2f} | Cliente {customer_id}")
-        return True
+    # Simula recusa de pagamento em 2% dos casos (cartão sem limite, etc.)
+    if random.random() < 0.02:
+        print(f"  [PAGAMENTO] ❌ RECUSADO | {order_id} | R$ {amount:.2f}")
+        # requeue=False → não volta para a fila principal, vai para a DLQ
+        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+        return
+
+    print(f"  [PAGAMENTO] ✅ Aprovado | {order_id} | R$ {amount:.2f} | Cliente {customer_id}")
+    # Confirma que a mensagem foi processada com sucesso
+    ch.basic_ack(delivery_tag=method.delivery_tag)
+
+
+def main():
+    print(f"[PAGAMENTO] Conectando ao RabbitMQ e ouvindo a fila '{FILA}'...")
+    print(f"[PAGAMENTO] Aguardando pedidos. Pressione Ctrl+C para sair.\n")
+
+    connection = conectar()
+    channel = connection.channel()
+
+    # prefetch_count=10 → recebe no máximo 10 mensagens de uma vez,
+    # evitando sobrecarregar este consumidor enquanto outros ficam sem trabalho
+    channel.basic_qos(prefetch_count=10)
+
+    channel.basic_consume(
+        queue=FILA,
+        on_message_callback=processar_pagamento,
+        auto_ack=False,  # False = o script confirma manualmente (mais seguro)
+    )
+
+    try:
+        channel.start_consuming()
+    except KeyboardInterrupt:
+        print("\n[PAGAMENTO] Encerrando...")
+        channel.stop_consuming()
+
+    connection.close()
 
 
 if __name__ == "__main__":
-    PaymentConsumer().run()
+    main()

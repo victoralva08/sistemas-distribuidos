@@ -1,3 +1,19 @@
+"""
+producer.py
+-----------
+O PRODUTOR é o responsável por CRIAR e ENVIAR pedidos para o RabbitMQ.
+Imagine ele como a "loja online": quando um cliente compra algo, o produtor
+gera um pedido em formato JSON e coloca na fila certa.
+
+Como funciona resumidamente:
+  1. Conecta ao RabbitMQ
+  2. Cria o "exchange" (central de distribuição) e as filas, se ainda não existirem
+  3. Gera N pedidos aleatórios e os envia, um por um
+
+Execute com:
+  python producer.py --total 5000
+"""
+
 import pika
 import uuid
 import json
@@ -6,23 +22,27 @@ import time
 import argparse
 from datetime import datetime, timezone
 
-# ── Configurações ──────────────────────────────────────────────────
+# ── Configurações de conexão ───────────────────────────────────────
 RABBITMQ_HOST = "localhost"
 RABBITMQ_USER = "admin"
 RABBITMQ_PASS = "admin123"
-EXCHANGE_NAME  = "orders.exchange"
+EXCHANGE_NAME  = "orders.exchange"   # nome do "hub" central de mensagens
 
+# Cada mensagem vai para um desses "destinos" (routing keys).
+# O RabbitMQ lê a routing key e decide em qual fila colocar a mensagem.
 ROUTING_KEYS = [
-    "order.payment.new",
-    "order.stock.reserve",
-    "order.notify.confirm",
-    "order.audit.log",
+    "order.payment.new",    # → fila de pagamento
+    "order.stock.reserve",  # → fila de estoque
+    "order.notify.confirm", # → fila de notificação
+    "order.audit.log",      # → fila de auditoria (recebe TUDO)
 ]
 
+# Produtos fictícios para simular pedidos realistas
 PRODUCTS = ["notebook", "smartphone", "tablet", "monitor", "headset", "keyboard", "mouse"]
 
 
-def get_connection():
+def conectar():
+    """Abre e retorna uma conexão com o RabbitMQ."""
     credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
     params = pika.ConnectionParameters(
         host=RABBITMQ_HOST,
@@ -33,58 +53,63 @@ def get_connection():
     return pika.BlockingConnection(params)
 
 
-def setup_infrastructure(channel):
-    """Declara o exchange, filas e bindings."""
-
-    # Topic Exchange principal
+def criar_infraestrutura(channel):
+    """
+    Declara o exchange, as filas e faz os bindings (ligações entre eles).
+    Isso é feito apenas uma vez; se já existir, o RabbitMQ ignora silenciosamente.
+    """
+    # O exchange do tipo "topic" roteia mensagens baseado em padrões (ex: order.payment.*)
     channel.exchange_declare(
         exchange=EXCHANGE_NAME,
         exchange_type="topic",
-        durable=True,
+        durable=True,   # durable=True significa que sobrevive a reinicializações
     )
 
-    # Dead Letter Exchange
+    # Dead Letter Exchange (DLX): para onde vão as mensagens que falharam
     channel.exchange_declare(
         exchange="orders.dlx",
         exchange_type="fanout",
         durable=True,
     )
 
-    # Dead Letter Queue
-    channel.queue_declare(
-        queue="orders.dlq",
-        durable=True,
-    )
+    # Dead Letter Queue (DLQ): a fila de mensagens "mortas" / com falha
+    channel.queue_declare(queue="orders.dlq", durable=True)
     channel.queue_bind(exchange="orders.dlx", queue="orders.dlq")
 
-    queue_args = {
+    # Configurações extras para todas as filas principais:
+    # - quorum: o dado é replicado nos 3 nós do cluster (alta disponibilidade)
+    # - ttl: mensagem expira após 60 segundos se ninguém consumir
+    # - dead-letter: mensagem com falha vai para a DLQ automaticamente
+    queue_config = {
         "x-queue-type":           "quorum",
         "x-dead-letter-exchange": "orders.dlx",
-        "x-message-ttl":          60000,   # 60s de TTL
+        "x-message-ttl":          60000,
     }
 
+    # Lista de filas: (nome da fila, padrão de routing key que ela aceita)
     filas = [
-        ("orders.payment",      "order.payment.*"),
-        ("orders.stock",        "order.stock.*"),
-        ("orders.notification", "order.notify.*"),
-        ("orders.audit",        "order.#"),      # captura TUDO
+        ("orders.payment",      "order.payment.*"),   # só pagamentos
+        ("orders.stock",        "order.stock.*"),      # só estoque
+        ("orders.notification", "order.notify.*"),     # só notificações
+        ("orders.audit",        "order.#"),            # o "#" significa TUDO
     ]
 
-    for fila, routing_pattern in filas:
-        channel.queue_declare(queue=fila, durable=True, arguments=queue_args)
+    for nome_fila, padrao in filas:
+        channel.queue_declare(queue=nome_fila, durable=True, arguments=queue_config)
         channel.queue_bind(
             exchange=EXCHANGE_NAME,
-            queue=fila,
-            routing_key=routing_pattern,
+            queue=nome_fila,
+            routing_key=padrao,
         )
 
-    print("[SETUP] Exchange, filas e bindings configurados.")
+    print("[SETUP] Exchange, filas e bindings prontos.")
 
 
-def build_message(order_id: int) -> dict:
+def gerar_pedido(numero: int) -> dict:
+    """Gera um pedido fictício com dados aleatórios."""
     return {
         "event_id":   str(uuid.uuid4()),
-        "order_id":   f"ORD-{order_id:06d}",
+        "order_id":   f"ORD-{numero:06d}",
         "customer_id": f"CUST-{random.randint(1, 500):04d}",
         "product_id": random.choice(PRODUCTS),
         "quantity":   random.randint(1, 5),
@@ -93,67 +118,69 @@ def build_message(order_id: int) -> dict:
     }
 
 
-def run(total: int, batch_report: int = 1000):
-    print(f"[PRODUCER] Conectando ao RabbitMQ em {RABBITMQ_HOST}...")
-    connection = get_connection()
+def executar(total: int, intervalo_log: int = 1000):
+    """Conecta ao RabbitMQ e envia `total` pedidos."""
+    print(f"[PRODUTOR] Conectando ao RabbitMQ em {RABBITMQ_HOST}...")
+    connection = conectar()
     channel = connection.channel()
 
-    # Confirmação de entrega (publisher confirms)
+    # Ativa confirmação de entrega: o RabbitMQ confirma que recebeu cada mensagem
     channel.confirm_delivery()
 
-    setup_infrastructure(channel)
+    criar_infraestrutura(channel)
 
-    print(f"[PRODUCER] Enviando {total:,} mensagens...\n")
+    print(f"[PRODUTOR] Enviando {total:,} pedidos...\n")
 
-    start = time.time()
-    errors = 0
+    inicio = time.time()
+    erros = 0
 
     for i in range(1, total + 1):
         routing_key = random.choice(ROUTING_KEYS)
-        message = build_message(i)
-        body = json.dumps(message).encode("utf-8")
+        pedido = gerar_pedido(i)
+        corpo = json.dumps(pedido).encode("utf-8")
 
         try:
             channel.basic_publish(
                 exchange=EXCHANGE_NAME,
                 routing_key=routing_key,
-                body=body,
+                body=corpo,
                 properties=pika.BasicProperties(
-                    delivery_mode=2,          # persistente
+                    delivery_mode=2,  # 2 = persistente (sobrevive a reinicialização)
                     content_type="application/json",
-                    message_id=message["event_id"],
+                    message_id=pedido["event_id"],
                 ),
                 mandatory=True,
             )
         except Exception as e:
-            errors += 1
-            print(f"  [ERRO] Mensagem {i}: {e}")
+            erros += 1
+            print(f"  [ERRO] Pedido {i}: {e}")
             continue
 
-        if i % batch_report == 0:
-            elapsed = time.time() - start
-            rate = i / elapsed
-            print(f"  Enviadas: {i:>7,} | Tempo: {elapsed:>6.1f}s | Taxa: {rate:>8.0f} msg/s")
+        # Exibe progresso a cada `intervalo_log` mensagens
+        if i % intervalo_log == 0:
+            decorrido = time.time() - inicio
+            taxa = i / decorrido
+            print(f"  Enviados: {i:>7,} | Tempo: {decorrido:>6.1f}s | Taxa: {taxa:>8.0f} msg/s")
 
-    elapsed = time.time() - start
-    rate = total / elapsed
+    decorrido = time.time() - inicio
+    taxa = total / decorrido
 
-    print(f"\n{'='*55}")
-    print(f"  TOTAL ENVIADO : {total:,} mensagens")
-    print(f"  ERROS         : {errors}")
-    print(f"  TEMPO TOTAL   : {elapsed:.2f}s")
-    print(f"  TAXA MEDIA    : {rate:.0f} msg/s")
-    print(f"{'='*55}")
+    print(f"\n{'='*50}")
+    print(f"  TOTAL ENVIADO : {total:,} pedidos")
+    print(f"  ERROS         : {erros}")
+    print(f"  TEMPO TOTAL   : {decorrido:.2f}s")
+    print(f"  TAXA MÉDIA    : {taxa:.0f} msg/s")
+    print(f"{'='*50}")
 
     connection.close()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="RabbitMQ Producer – TP01")
+    parser = argparse.ArgumentParser(description="Produtor de pedidos – TP01")
     parser.add_argument("--total", type=int, default=10000,
-                        help="Total de mensagens a enviar (default: 10000)")
+                        help="Quantos pedidos enviar (padrão: 10000)")
     parser.add_argument("--report", type=int, default=1000,
-                        help="Intervalo de relatório (default: 1000)")
+                        help="A cada quantos pedidos imprimir progresso (padrão: 1000)")
     args = parser.parse_args()
 
-    run(total=args.total, batch_report=args.report)
+    executar(total=args.total, intervalo_log=args.report)

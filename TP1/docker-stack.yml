@@ -1,0 +1,102 @@
+# docker-stack.yml
+# ─────────────────────────────────────────────────────────────────────
+# Arquivo de deploy para Docker SWARM.
+# Use este arquivo no lugar do docker-compose.yml quando quiser rodar
+# o projeto com um orquestrador real.
+#
+# Diferenças em relação ao docker-compose.yml:
+#   - Rede "overlay": funciona entre múltiplas máquinas (não só localhost)
+#   - Seção "deploy": o Swarm usa isso para gerenciar os containers
+#     (reiniciar automaticamente, distribuir entre nós, limitar recursos)
+#   - Sem "depends_on": o Swarm usa restart_policy no lugar
+#   - Sem "container_name": o Swarm gera os nomes automaticamente
+#
+# Como usar:
+#   1. Ativar o Swarm:   docker swarm init
+#   2. Fazer o deploy:   docker stack deploy -c docker-stack.yml tp01
+#   3. Unir em cluster:  bash init_cluster_swarm.sh
+#   4. Ver os serviços:  docker service ls
+#   5. Remover tudo:     docker stack rm tp01
+
+version: '3.8'
+
+services:
+
+  # ── Nó 1 do RabbitMQ (o "líder" do cluster) ───────────────────────
+  rabbit1:
+    image: rabbitmq:3.13-management
+    hostname: rabbit1                      # nome fixo — necessário para o cluster funcionar
+    environment:
+      RABBITMQ_ERLANG_COOKIE: "TP01_SECRET_COOKIE"   # todos os nós precisam do mesmo cookie
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+    ports:
+      - "5672:5672"    # AMQP — onde os scripts Python se conectam
+      - "15672:15672"  # painel web de gerenciamento
+    volumes:
+      - rabbit1_data:/var/lib/rabbitmq
+    networks:
+      - rabbitmq_net
+    deploy:
+      replicas: 1                    # sempre 1 instância deste serviço
+      restart_policy:
+        condition: on-failure        # se cair, o Swarm reinicia automaticamente
+        delay: 10s                   # aguarda 10s antes de tentar reiniciar
+        max_attempts: 5              # tenta no máximo 5 vezes
+      placement:
+        constraints:
+          - node.role == manager     # garante que o nó 1 fica na máquina manager
+
+  # ── Nó 2 do RabbitMQ ──────────────────────────────────────────────
+  rabbit2:
+    image: rabbitmq:3.13-management
+    hostname: rabbit2
+    environment:
+      RABBITMQ_ERLANG_COOKIE: "TP01_SECRET_COOKIE"
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    volumes:
+      - rabbit2_data:/var/lib/rabbitmq
+    networks:
+      - rabbitmq_net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+
+  # ── Nó 3 do RabbitMQ ──────────────────────────────────────────────
+  rabbit3:
+    image: rabbitmq:3.13-management
+    hostname: rabbit3
+    environment:
+      RABBITMQ_ERLANG_COOKIE: "TP01_SECRET_COOKIE"
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+    ports:
+      - "5674:5672"
+      - "15674:15672"
+    volumes:
+      - rabbit3_data:/var/lib/rabbitmq
+    networks:
+      - rabbitmq_net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+
+networks:
+  rabbitmq_net:
+    driver: overlay      # overlay = rede virtual que conecta containers mesmo em máquinas diferentes
+    attachable: true     # permite que containers fora da stack (ex: scripts Python) se conectem
+
+volumes:
+  rabbit1_data:
+  rabbit2_data:
+  rabbit3_data:

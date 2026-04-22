@@ -1,17 +1,17 @@
 services:
 
-  # ── Nó 1 – primário ─────────────────────────────────────────────
+  # ── Nó 1 do RabbitMQ (o principal, o "chefe" do cluster) ─────────
   rabbit1:
     image: rabbitmq:3.13-management
     hostname: rabbit1
     container_name: rabbit1
     environment:
-      RABBITMQ_ERLANG_COOKIE: "TP01_SECRET_COOKIE"
+      RABBITMQ_ERLANG_COOKIE: "TP01_SECRET_COOKIE"   # segredo compartilhado entre os nós
       RABBITMQ_DEFAULT_USER: admin
       RABBITMQ_DEFAULT_PASS: admin123
     ports:
-      - "5672:5672"
-      - "15672:15672"   # Management UI
+      - "5672:5672"    # porta AMQP (onde os scripts Python se conectam)
+      - "15672:15672"  # portal web de gerenciamento do RabbitMQ
     volumes:
       - rabbit1_data:/var/lib/rabbitmq
     networks:
@@ -22,7 +22,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # ── Nó 2 ────────────────────────────────────────────────────────
+  # ── Nó 2 (aguarda o nó 1 estar saudável antes de subir) ──────────
   rabbit2:
     image: rabbitmq:3.13-management
     hostname: rabbit2
@@ -42,7 +42,7 @@ services:
       rabbit1:
         condition: service_healthy
 
-  # ── Nó 3 ────────────────────────────────────────────────────────
+  # ── Nó 3 ─────────────────────────────────────────────────────────
   rabbit3:
     image: rabbitmq:3.13-management
     hostname: rabbit3
@@ -62,27 +62,6 @@ services:
       rabbit1:
         condition: service_healthy
 
-  # ── PostgreSQL ───────────────────────────────────────────────────
-  postgres:
-    image: postgres:16
-    container_name: postgres
-    environment:
-      POSTGRES_DB: ecommerce
-      POSTGRES_USER: tp01
-      POSTGRES_PASSWORD: tp01pass
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
-    networks:
-      - rabbitmq_net
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tp01 -d ecommerce"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
 networks:
   rabbitmq_net:
     driver: bridge
@@ -91,4 +70,3 @@ volumes:
   rabbit1_data:
   rabbit2_data:
   rabbit3_data:
-  postgres_data:
