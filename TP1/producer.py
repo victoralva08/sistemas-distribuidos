@@ -20,12 +20,13 @@ import json
 import random
 import time
 import argparse
+import os
 from datetime import datetime, timezone
 
-# ── Configurações de conexão ───────────────────────────────────────
-RABBITMQ_HOST = "localhost"
-RABBITMQ_USER = "admin"
-RABBITMQ_PASS = "admin123"
+# ── Configurações de conexão (via environment variables) ────────────
+RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
+RABBITMQ_USER = os.getenv("RABBITMQ_USER", "admin")
+RABBITMQ_PASS = os.getenv("RABBITMQ_PASS", "admin123")
 EXCHANGE_NAME  = "orders.exchange"   # nome do "hub" central de mensagens
 
 # Cada mensagem vai para um desses "destinos" (routing keys).

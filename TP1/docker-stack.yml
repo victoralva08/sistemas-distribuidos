@@ -91,6 +91,111 @@ services:
         delay: 10s
         max_attempts: 5
 
+  # ── API REST para submeter pedidos remotamente ─────────────────────
+  producer_api:
+    image: python:3.11-slim
+    working_dir: /app
+    command: sh -c "pip install -q pika flask && python producer_api.py"
+    environment:
+      RABBITMQ_HOST: rabbit1
+      RABBITMQ_USER: admin
+      RABBITMQ_PASS: admin123
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./producer_api.py:/app/producer_api.py:ro
+    networks:
+      - rabbitmq_net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+
+  # ── Dashboard de monitoramento (SSE em tempo real) ────────────────────
+  dashboard:
+    image: python:3.11-slim
+    working_dir: /app
+    command: sh -c "pip install -q flask requests && python dashboard.py"
+    environment:
+      RABBITMQ_HOST: rabbit1
+      RABBITMQ_USER: admin
+      RABBITMQ_PASS: admin123
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./dashboard.py:/app/dashboard.py:ro
+      - ./templates:/app/templates:ro
+    networks:
+      - rabbitmq_net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+
+  # ── Consumidor de Pagamento (escalável) ────────────────────────────
+  consumer_payment:
+    image: python:3.11-slim
+    working_dir: /app
+    command: sh -c "pip install -q pika && python consumer_payment.py"
+    environment:
+      RABBITMQ_HOST: rabbit1
+      RABBITMQ_USER: admin
+      RABBITMQ_PASS: admin123
+    volumes:
+      - ./consumer_payment.py:/app/consumer_payment.py:ro
+    networks:
+      - rabbitmq_net
+    deploy:
+      replicas: 1                   # Escale aumentando este número
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+
+  # ── Consumidor de Estoque (escalável) ────────────────────────────
+  consumer_stock:
+    image: python:3.11-slim
+    working_dir: /app
+    command: sh -c "pip install -q pika && python consumer_stock.py"
+    environment:
+      RABBITMQ_HOST: rabbit1
+      RABBITMQ_USER: admin
+      RABBITMQ_PASS: admin123
+    volumes:
+      - ./consumer_stock.py:/app/consumer_stock.py:ro
+    networks:
+      - rabbitmq_net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+
+  # ── Consumidor de Notificações (escalável) ────────────────────────
+  consumer_notification:
+    image: python:3.11-slim
+    working_dir: /app
+    command: sh -c "pip install -q pika && python consumer_notification.py"
+    environment:
+      RABBITMQ_HOST: rabbit1
+      RABBITMQ_USER: admin
+      RABBITMQ_PASS: admin123
+    volumes:
+      - ./consumer_notification.py:/app/consumer_notification.py:ro
+    networks:
+      - rabbitmq_net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+
 networks:
   rabbitmq_net:
     driver: overlay      # overlay = rede virtual que conecta containers mesmo em máquinas diferentes

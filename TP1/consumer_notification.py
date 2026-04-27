@@ -21,11 +21,12 @@ import pika
 import json
 import time
 import random
+import os
 
-# ── Configurações ──────────────────────────────────────────────────
-RABBITMQ_HOST = "localhost"
-RABBITMQ_USER = "admin"
-RABBITMQ_PASS = "admin123"
+# ── Configurações (via environment variables) ──────────────────────
+RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
+RABBITMQ_USER = os.getenv("RABBITMQ_USER", "admin")
+RABBITMQ_PASS = os.getenv("RABBITMQ_PASS", "admin123")
 FILA = "orders.notification"
 
 # Canais de comunicação disponíveis para notificar o cliente

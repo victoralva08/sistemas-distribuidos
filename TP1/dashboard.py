@@ -23,13 +23,17 @@ from flask import Flask, Response, render_template
 import requests
 import json
 import time
+import os
 
 app = Flask(__name__)
 
 # URL da API de gerenciamento interna do RabbitMQ (Management Plugin)
-RABBITMQ_API_OVERVIEW = "http://localhost:15672/api/overview"
-RABBITMQ_API_QUEUES = "http://localhost:15672/api/queues"
-AUTH = ("admin", "admin123")
+RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
+RABBITMQ_USER = os.getenv("RABBITMQ_USER", "admin")
+RABBITMQ_PASS = os.getenv("RABBITMQ_PASS", "admin123")
+RABBITMQ_API_OVERVIEW = f"http://{RABBITMQ_HOST}:15672/api/overview"
+RABBITMQ_API_QUEUES = f"http://{RABBITMQ_HOST}:15672/api/queues"
+AUTH = (RABBITMQ_USER, RABBITMQ_PASS)
 
 
 @app.route("/")
